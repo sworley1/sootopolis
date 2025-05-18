@@ -1,0 +1,6 @@
+
+# Venv
+.venv/*
+
+.DS_Store
+.marimo

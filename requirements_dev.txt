@@ -1,0 +1,5 @@
+marimo
+scikit-learn
+altair
+polars
+narwhals
