@@ -3,3 +3,6 @@ scikit-learn
 altair
 polars
 narwhals
+vega_datasets
+pandas
+setuptools
