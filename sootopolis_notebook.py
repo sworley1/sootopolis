@@ -7,7 +7,6 @@ with app.setup:
     # Initialization code that runs before all other cells
     import marimo as mo
     import polars as pl
-    import pandas as pd
     import altair as alt
     from sklearn.linear_model import LinearRegression
     from vega_datasets import data
