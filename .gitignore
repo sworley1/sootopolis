@@ -4,3 +4,10 @@
 
 .DS_Store
 .marimo
+
+dist/
+build/
+
+*.egg-info/
+
+docs/

@@ -6,3 +6,4 @@ narwhals
 vega_datasets
 pandas
 setuptools
+ruff
