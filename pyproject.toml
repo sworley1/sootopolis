@@ -5,9 +5,9 @@ description = "A python package which creates waterfall charts for explaining li
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "altair",
-    "polars",
-    "narwhals"
+    "altair >= 5.5.0",
+    "polars >= 1.29.0",
+    "narwhals >= 1.40.0"
 ]
 
 [tool.mypy]
