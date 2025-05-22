@@ -11,7 +11,11 @@ def setup_data(model , point_to_predict, regressor_labels):
 
     for regressor,coef in zip(['Intercept'] +  regressor_labels , intercept_val + model.coef_.tolist()[0] ):
         if regressor != 'Intercept':
-            value = coef * point_to_predict[regressor][0]
+            point_est = point_to_predict[regressor]
+            try:
+                value = coef * point_est[0]
+            except Exception as e:
+                Exception(e)
         else:
             value = coef
 
@@ -22,6 +26,14 @@ def setup_data(model , point_to_predict, regressor_labels):
 
 
 def plot_altair_waterfall(source) -> alt.Chart:
+    '''
+    Function to generate the altair waterfall chart  
+
+    # Parameters:
+    source : dataframe 
+    '''
+
+
     amount = alt.datum.amount
     label = alt.datum.label
     window_lead_label = alt.datum.window_lead_label
