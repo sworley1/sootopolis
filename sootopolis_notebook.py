@@ -4,16 +4,39 @@ __generated_with = "0.13.10"
 app = marimo.App(width="medium")
 
 with app.setup:
-    # Initialization code that runs before all other cells
     import marimo as mo
     import polars as pl
     import altair as alt
-    from sklearn.linear_model import LinearRegression
+    from sklearn.linear_model import LinearRegression, Lasso
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler, Normalizer
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.pipeline import make_pipeline, Pipeline
+    from sklearn.compose import ColumnTransformer
     from vega_datasets import data
+    import narwhals as nw
+    import numpy as np
+
+    import sootopolis as soot
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(
+        r"""
+    # Sootopolis
+
+    ## Example 1
+    Sootopolis provides a function to visualize the drivers of Linear Regression like model. This notebook provides a new examples of how to use it.    
+
+    Let's start with the cars dataset and fit a Linear Regression to predict miles per gallon for a vehicle.
+    """
+    )
+    return
 
 
 @app.cell
 def _():
+    # Load the dataset into polars
     cars = pl.from_pandas( data.cars() )
     cars
     return (cars,)
@@ -25,155 +48,81 @@ def _(cars):
         alt.Y("Miles_per_Gallon"),
         alt.X("Displacement"),
         alt.Color("Acceleration:Q")
-    )
+    ).properties(title="Vega Cars Dataset: Negative Relationship between Displacement and MPG")
     return
 
 
 @app.cell
 def _(cars):
+    # Fit the Linear Regression Model
     sample = cars.filter(pl.col("Miles_per_Gallon").is_not_null()).filter(pl.col("Horsepower").is_not_null() )
     X = sample.select(['Displacement','Acceleration','Weight_in_lbs' ])
     y = sample.select('Miles_per_Gallon')
     lr = LinearRegression().fit(X,y)
 
-    data_to_plot = []
-    point_to_plot = X[47]
-    for regressor,coef in zip(
-        ['Intercept']+X.columns, 
-        lr.intercept_.tolist() + lr.coef_.tolist()[0],
-    ):
-        if regressor != 'Intercept':
-            value = coef * point_to_plot[regressor][0]
-        else:
-            value = coef
-
-        data_to_plot.append({'label':regressor, 'amount':value})
-
-    data_to_plot.append({'label':'End', 'amount':0.0})
-    return X, data_to_plot, lr, y
+    return X, lr, sample
 
 
-@app.function
-def setup_data(model , point_to_predict, regressor_labels):
-    '''
-    
-    '''
-    data_to_plot = []
-
-    intercept_val = [0.0] if model.intercept_ == 0 else model.intercept_.tolist()
-
-    for regressor,coef in zip(['Intercept'] +  regressor_labels , intercept_val + model.coef_.tolist()[0] ):
-        if regressor != 'Intercept':
-            value = coef * point_to_predict[regressor][0]
-        else:
-            value = coef
-
-        data_to_plot.append({'label':regressor, 'amount':value})
-
-    data_to_plot.append({'label':'End', 'amount':0.0})
-    return pl.DataFrame(data_to_plot)
-
-
-@app.cell
-def _(data_to_plot):
-    source=pl.DataFrame(data_to_plot)
-    source
-    return (source,)
-
-
-@app.function
-# Define frequently referenced fields
-def plot_altair_waterfall(source) -> alt.Chart:
-    amount = alt.datum.amount
-    label = alt.datum.label
-    window_lead_label = alt.datum.window_lead_label
-    window_sum_amount = alt.datum.window_sum_amount
-
-    # Define frequently referenced/long expressions
-    calc_prev_sum = alt.expr.if_(label == "End", 0, window_sum_amount - amount)
-    calc_amount = alt.expr.if_(label == "End", window_sum_amount, amount)
-    calc_text_amount = (
-        alt.expr.if_((label != "Intercept") & (label != "End") & calc_amount > 0, "+", "")
-        + calc_amount
-    )
-
-    # The "base_chart" defines the transform_window, transform_calculate, and X axis
-    base_chart = alt.Chart(source).transform_window(
-        window_sum_amount="sum(amount)",
-        window_lead_label="lead(label)",
-    ).transform_calculate(
-        calc_lead=alt.expr.if_((window_lead_label == None), label, window_lead_label),
-        calc_prev_sum=calc_prev_sum,
-        calc_amount=calc_amount,
-        calc_text_amount=calc_text_amount,
-        calc_center=(window_sum_amount + calc_prev_sum) / 2,
-        calc_sum_dec=alt.expr.if_(window_sum_amount < calc_prev_sum, window_sum_amount, "None"),
-        calc_sum_inc=alt.expr.if_(window_sum_amount > calc_prev_sum, window_sum_amount, "None"),
-    ).encode(
-        x=alt.X("label:O", axis=alt.Axis(title="", labelAngle=0), sort=None)
-    )
-
-    color_coding = (
-        alt.when((label == "Intercept") | (label == "End"))
-        .then(alt.value("#878d96"))
-        .when(calc_amount > 0)
-        .then(alt.value("green"))#24a148
-        .otherwise(alt.value("red"))##fa4d56
-    )
-
-    bar = base_chart.mark_bar(size=45).encode(
-        y=alt.Y("calc_prev_sum:Q", title="Amount"),
-        y2=alt.Y2("window_sum_amount:Q"),
-        color=color_coding,
-    )
-
-    # The "rule" chart is for the horizontal lines that connect the bars
-    rule = base_chart.mark_rule(xOffset=-22.5, x2Offset=22.5).encode(
-        y="window_sum_amount:Q",
-        x2="calc_lead",
-    )
-
-    # Add values as text
-    text_pos_values_top_of_bar = base_chart.mark_text(baseline="bottom", dy=-4).encode(
-        text=alt.Text("calc_sum_inc:N",format=',.2f'),
-        y="calc_sum_inc:Q",
-    )
-    text_neg_values_bot_of_bar = base_chart.mark_text(baseline="top", dy=4).encode(
-        text=alt.Text("calc_sum_dec:N", format=',.2f'),
-        y="calc_sum_dec:Q",
-    )
-    text_bar_values_mid_of_bar = base_chart.mark_text(baseline="middle").encode(
-        text=alt.Text("calc_text_amount:N",format=',.2f'),
-        y="calc_center:Q",
-        color=alt.value("white"),
-    )
-
-    return alt.layer(
-        bar,
-        rule,
-        text_pos_values_top_of_bar,
-        text_neg_values_bot_of_bar,
-        text_bar_values_mid_of_bar
-    ).properties(
-        width=800,
-        height=450
-    )
-
-
-@app.cell
-def _(source):
-    plot_altair_waterfall(source)
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""`sootopolis` provides a function `setup_data` which shows the data input into the waterfall chart.  """)
     return
 
 
 @app.cell
-def _(X, y):
-    lr2 = LinearRegression(fit_intercept=True).fit(X,y)
+def _(X, lr, sample):
+    setup_data_ = soot.setup_data(
+        model=lr,point_to_predict=sample[42],regressor_labels=X.columns
+    )
+    setup_data_
+    return (setup_data_,)
 
-    s = X[12]
 
-    sourc2 = setup_data(lr2, s, X.columns)
-    plot_altair_waterfall(sourc2)
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""`sootopolis` provides a function to take the data loaded from `setup_data` and plot the waterfall. `plot_altair_waterfall` returns a `altair` chart which can be customized in the `.properties()` method.""")
+    return
+
+
+@app.cell
+def _(setup_data_):
+    soot.plot_altair_waterfall(source=setup_data_).properties(
+        title='Linear Regression for Predicting MPG'
+    )
+    return
+
+
+app._unparsable_cell(
+    r"""
+    `sootopolis` also provides a function which returns the altair waterfall chart without going through the intermediate step of `setup_data` 
+    """,
+    name="_"
+)
+
+
+@app.cell
+def _(X, lr, sample):
+    soot.plot_waterfall(
+        model=lr, # takes model as input
+        point_to_predict=sample[42], # single row in the dataframe
+        regressor_labels=X.columns # regressor labels
+    ).properties(
+        title='Linear Regression for Predicting MPG'
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(
+        r"""
+    ## Example for Using `sootopolis` to drive insights. 
+
+    Thanks to [`marimo`](https://marimo.io/), you can use interaction to understand what may be driving a given estimate.  
+
+    Click on point in the top altair chart and the waterfall chart will appear below. 
+    """
+    )
     return
 
 
@@ -215,7 +164,7 @@ def _(X, lr, moTestChart):
         #bottomChart = plot_altair_waterfall(sourc3).properties(
         #    height=200,title='linear regression equation for predicting miles per gallon'
         #)
-        bottomChart = plot_waterfall(lr, X_sample, X.columns).properties(
+        bottomChart = soot.plot_waterfall(lr, X_sample, X.columns).properties(
             height=200,title='linear regression equation for predicting miles per gallon'
         )
     else:
@@ -224,17 +173,238 @@ def _(X, lr, moTestChart):
     return (bottomChart,)
 
 
-@app.function
-def plot_waterfall(model, point_to_predict, regressor_labels):
-    source = setup_data(
-        model=model,
-        point_to_predict=point_to_predict,
-        regressor_labels=regressor_labels
+@app.cell(hide_code=True)
+def _():
+    mo.md(
+        r"""
+    # Example 2 - Gapminder  
+
+    And using `narwhals`
+    """
     )
-    return plot_altair_waterfall(source)
+    return
 
 
 @app.cell
+def _():
+    gm = nw.from_native(  data.gapminder_health_income() ) # load the dataset
+    alt.Chart(gm).mark_circle().encode(
+        alt.X("income").scale(zero=False),
+        alt.Y("health").scale(zero=False),
+        #alt.Size("population")
+    ).interactive()
+    return (gm,)
+
+
+@app.cell
+def _(gm):
+    gm2 = gm.with_columns(
+         nw.col('health').log().alias("ln_health"),
+         nw.col("income").log().alias("ln_income")
+    )
+    base = alt.Chart(
+        gm2  
+    )
+    circles = base.mark_circle().encode(
+        alt.X("ln_income").scale(zero=False),
+        alt.Y("health").scale(zero=False),
+        alt.Size('population').scale(zero=False),
+        tooltip=['country']
+    )
+
+    gm_chart = (
+        circles + base.transform_regression("ln_income", "health").mark_line(color='red').encode(
+            alt.X("ln_income"),
+            alt.Y("health")
+        )
+    ).properties(
+        title="Using LN(Income) to predict Health"
+    )
+
+    mo_gm_chart = mo.ui.altair_chart(gm_chart)
+    return gm2, mo_gm_chart
+
+
+@app.cell
+def _(gm2):
+    XY_gm = gm2.select(['health','ln_income'])
+    X2 = XY_gm.select(['ln_income'])
+    y2 = XY_gm.select(['health'])
+    lr2 = LinearRegression().fit(
+        X2,y2
+    )
+    return X2, lr2
+
+
+@app.cell
+def _(X2, lr2, mo_gm_chart):
+    if len(mo_gm_chart.value) == 1:
+        soot2 = soot.plot_waterfall(
+            model=lr2
+            ,point_to_predict=mo_gm_chart.value
+            ,regressor_labels=X2.columns
+        ) 
+        soot2 = mo.ui.altair_chart(soot2)
+    else:
+        soot2 = None
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""Again we can use interaction within altair and marimo to see interpretation of a given point.""")
+    return
+
+
+@app.cell
+def _(X2, lr2, mo_gm_chart):
+    mo.vstack([
+        mo_gm_chart,
+        mo_gm_chart.value,
+        soot.setup_data(model=lr2, point_to_predict=mo_gm_chart.value, regressor_labels=X2.columns)
+        ,
+        soot.plot_waterfall(model=lr2, point_to_predict=mo_gm_chart.value, regressor_labels=X2.columns).properties(
+            height=200
+        )
+    ])
+    return
+
+
+@app.cell
+def _():
+    movies = data.movies() #.to_native()
+    movies =(
+        movies
+        .dropna(subset=['Production_Budget','IMDB_Rating','IMDB_Votes', 'Rotten_Tomatoes_Rating','US_Gross'])
+        #.insert(-1, 'Before_1990', np.where( movies['Release_Date'].str.slice(-4) < '1990', 1, 0) )
+        .query("US_Gross > 0")
+        #.insert(1, 'US_Gross_ln', np.log( movies['US_Gross'] ) ) 
+    )
+    movies['ln_US_Gross'] = np.log( movies['US_Gross'] )
+    movies #.to_native()
+    return (movies,)
+
+
+@app.cell
+def _(movies):
+    cat_features_to_graph = ['Distributor','Source','Major_Genre','Creative_Type']
+
+    movies_base = alt.Chart(movies)
+
+    movies_circle = movies_base.mark_circle(opacity=0.4).encode(
+        alt.X("US_Gross").title("US Gross $"),
+        alt.Y("Major_Genre").title(None),
+        alt.YOffset('jitter:Q'),
+        alt.Color("Major_Genre").title(None),
+        tooltip=['Title:N', 'Major_Genre']
+    ).transform_calculate(
+        # Generate Gaussian jitter with a Box-Muller transform
+        jitter="sqrt(-2*log(random()))*cos(2*PI*random())"
+    )
+    mean_circle = movies_base.mark_circle(opacity=1, size=100, stroke='black').encode(
+        alt.X("mean(US_Gross)"),
+        alt.Y("Major_Genre"),
+        alt.Color("Major_Genre")
+    )
+
+    v_rule = movies_base.mark_rule().encode(
+        alt.X("mean(US_Gross)").title('')
+    )
+    movies_chart = movies_circle + v_rule + mean_circle
+    movies_chart.properties(
+        title="Adventure leads other Genres with Highest Average Gross $ in US"
+    )
+    return
+
+
+@app.cell
+def _(movies):
+    alt.Chart(
+        movies
+    ).mark_bar().encode(
+        alt.X("ln_US_Gross").bin(maxbins=20),
+        alt.Y("count()")
+    )
+    return
+
+
+@app.cell
+def _(movies):
+    X3 = movies[['Production_Budget','IMDB_Rating','IMDB_Votes', 'Rotten_Tomatoes_Rating','Major_Genre']]
+    y3 = movies['ln_US_Gross']
+
+    categorical_features = ["Major_Genre"]
+    categorical_transformer = Pipeline(
+        steps=[
+            ("encoder", OneHotEncoder(handle_unknown="ignore")),
+            #("selector", SelectPercentile(chi2, percentile=50)),
+        ]
+    )
+
+    numeric_features =['Production_Budget','IMDB_Rating','IMDB_Votes','Rotten_Tomatoes_Rating']
+    numeric_transformer = Pipeline(
+        steps=[
+            ('scaler',StandardScaler())
+        ]
+    )
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, numeric_features),
+            ("cat", categorical_transformer, categorical_features),
+        ]
+    )
+    reg = Pipeline(
+        steps=[("preprocessor", preprocessor), ("reg", Lasso())]
+    )
+    parameters = {'reg__alpha':[i/10 for i in range(1,11)]}
+
+    grid_search = GridSearchCV(reg, param_grid=parameters)
+
+    lr3 = grid_search.fit(X3, y3)
+
+    lr3
+
+    return X3, lr3, y3
+
+
+@app.cell
+def _():
+    # works for pipeline
+    #fnames = reg[:-1].get_feature_names_out()
+    #coefs_ = reg[1].coef_
+    #for f,c in zip(fnames, coefs_):
+    #    print(f"{f} - {c:.4f}")
+    return
+
+
+@app.cell
+def _(X3, lr3, y3):
+    resid = pl.DataFrame({
+        'y_true':y3.tolist(),
+        'y_pred':lr3.predict(X3).tolist()
+    }).with_columns(
+        (pl.col("y_pred")-pl.col("y_true") ).alias("resid")
+    )
+    return (resid,)
+
+
+@app.cell
+def _(lr3):
+    lr3.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
+    return
+
+
+@app.cell
+def _(resid):
+    alt.Chart(resid).mark_circle(color='black').encode(
+        alt.X("y_true").scale(zero=False),
+        alt.Y("y_pred").scale(zero=False)
+    )
+    return
+
+
+@app.cell(hide_code=True)
 def _():
     return
 
