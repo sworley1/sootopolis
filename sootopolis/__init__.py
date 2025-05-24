@@ -1,27 +1,85 @@
 import altair as alt
 import polars as pl
+import numpy as np
+import sklearn
+import sklearn.model_selection
+import sklearn.pipeline
 
-def setup_data(model , point_to_predict, regressor_labels):
+def setup_data(model , point_to_predict, regressor_labels, ):
     '''
     
     '''
+
+    #if type(model) in [sklearn.model_selection.GridSearchCV , sklearn.model_selection.HalvingGridSearchCV, sklearn.model_selection.HalvingRandomSearchCV]:
+        #raise TypeError("model must not be a sklearn.model_selection. Try using the best estimator")
+    
+    if type(model) == sklearn.pipeline.Pipeline:
+
+        # assume pipeline model[-1] is the LR type model
+        # assume pipeline model[-2] is the what we can use to preprocess the given point_to_predict
+
+        estimator = model[-1]
+
+        preprocessor = model[0]
+        
+        transformed_input = preprocessor.transform(point_to_predict)
+        if type(transformed_input) != np.array and type(transformed_input) != np.ndarray:
+            transformed_input = transformed_input.toarray()
+        
+        # calc the multiplication for each feature
+        result = estimator.coef_ * transformed_input
+        result = result[0].tolist()
+
+        feat_names = preprocessor.get_feature_names_out().tolist()
+
+        assert len(feat_names) == len(result)
+
+        # prep zip 
+        feat_names = ['Intercept'] + feat_names 
+
+        estimates = [ estimator.intercept_ ] + result
+
+        data_to_plot = []
+        for regressor,coef in zip( feat_names, estimates ):
+            if abs(coef) > 0.0001:
+                data_to_plot.append({'label':regressor, 'amount':coef})
+
+
+        data_to_plot.append({'label':'End', 'amount':0.0})
+
+        return pl.DataFrame(data_to_plot)
+            
+
     data_to_plot = []
 
     intercept_val = [0.0] if model.intercept_ == 0 else model.intercept_.tolist()
 
     for regressor,coef in zip(['Intercept'] +  regressor_labels , intercept_val + model.coef_.tolist()[0] ):
         if regressor != 'Intercept':
-            value = coef * point_to_predict[regressor][0]
+            point_est = point_to_predict[regressor]
+            try:
+                value = coef * point_est[0]
+            except Exception as e:
+                Exception(e)
         else:
             value = coef
 
-        data_to_plot.append({'label':regressor, 'amount':value})
+        if abs(value) > 0.0001:
+            data_to_plot.append({'label':regressor, 'amount':value})
 
     data_to_plot.append({'label':'End', 'amount':0.0})
     return pl.DataFrame(data_to_plot)
 
 
 def plot_altair_waterfall(source) -> alt.Chart:
+    '''
+    Function to generate the altair waterfall chart  
+
+    # Parameters:
+    source : dataframe 
+    '''
+
+
     amount = alt.datum.amount
     label = alt.datum.label
     window_lead_label = alt.datum.window_lead_label
@@ -63,6 +121,7 @@ def plot_altair_waterfall(source) -> alt.Chart:
         y=alt.Y("calc_prev_sum:Q", title="Amount"),
         y2=alt.Y2("window_sum_amount:Q"),
         color=color_coding,
+        tooltip=['label',alt.Tooltip('amount', format=',.2f')]
     )
 
     # The "rule" chart is for the horizontal lines that connect the bars
@@ -75,6 +134,7 @@ def plot_altair_waterfall(source) -> alt.Chart:
     text_pos_values_top_of_bar = base_chart.mark_text(baseline="bottom", dy=-4).encode(
         text=alt.Text("calc_sum_inc:N",format=',.2f'),
         y="calc_sum_inc:Q",
+
     )
     text_neg_values_bot_of_bar = base_chart.mark_text(baseline="top", dy=4).encode(
         text=alt.Text("calc_sum_dec:N", format=',.2f'),
@@ -84,6 +144,7 @@ def plot_altair_waterfall(source) -> alt.Chart:
         text=alt.Text("calc_text_amount:N",format=',.2f'),
         y="calc_center:Q",
         color=alt.value("white"),
+        tooltip=['label',alt.Tooltip('amount', format=',.2f')]
     )
 
     return alt.layer(
