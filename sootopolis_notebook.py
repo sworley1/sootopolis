@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.13.10"
+__generated_with = "0.13.11"
 app = marimo.App(width="medium")
 
 with app.setup:
@@ -8,11 +8,12 @@ with app.setup:
     import polars as pl
     import altair as alt
     from sklearn.linear_model import LinearRegression, Lasso
-    from sklearn.preprocessing import OneHotEncoder, StandardScaler, Normalizer
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler, Normalizer, PolynomialFeatures
     from sklearn.model_selection import GridSearchCV
     from sklearn.pipeline import make_pipeline, Pipeline
     from sklearn.compose import ColumnTransformer
     from vega_datasets import data
+    import pandas as pd
     import narwhals as nw
     import numpy as np
 
@@ -21,9 +22,14 @@ with app.setup:
 
 @app.cell(hide_code=True)
 def _():
+    mo.md(r"""# Sootopolis""")
+    return
+
+
+@app.cell(hide_code=True)
+def _():
     mo.md(
         r"""
-    # Sootopolis
 
     ## Example 1
     Sootopolis provides a function to visualize the drivers of Linear Regression like model. This notebook provides a new examples of how to use it.    
@@ -65,7 +71,7 @@ def _(cars):
 
 @app.cell(hide_code=True)
 def _():
-    mo.md(r"""`sootopolis` provides a function `setup_data` which shows the data input into the waterfall chart.  """)
+    mo.md(r"""`sootopolis` provides a function `setup_data` which shows the data input into the waterfall chart.""")
     return
 
 
@@ -116,11 +122,11 @@ def _(X, lr, sample):
 def _():
     mo.md(
         r"""
-    ## Example for Using `sootopolis` to drive insights. 
+    ### Example for Using `sootopolis` to drive insights. 
 
     Thanks to [`marimo`](https://marimo.io/), you can use interaction to understand what may be driving a given estimate.  
 
-    Click on point in the top altair chart and the waterfall chart will appear below. 
+    Click on point in the top altair chart and the waterfall chart will appear below.
     """
     )
     return
@@ -177,7 +183,7 @@ def _(X, lr, moTestChart):
 def _():
     mo.md(
         r"""
-    # Example 2 - Gapminder  
+    ## Example 2 - Gapminder and narwhals
 
     And using `narwhals`
     """
@@ -270,6 +276,12 @@ def _(X2, lr2, mo_gm_chart):
     return
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md("""## Example 3: Using scikit-learn pipeline""")
+    return
+
+
 @app.cell
 def _():
     movies = data.movies() #.to_native()
@@ -285,7 +297,7 @@ def _():
     return (movies,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(movies):
     cat_features_to_graph = ['Distributor','Source','Major_Genre','Creative_Type']
 
@@ -295,7 +307,7 @@ def _(movies):
         alt.X("US_Gross").title("US Gross $"),
         alt.Y("Major_Genre").title(None),
         alt.YOffset('jitter:Q'),
-        alt.Color("Major_Genre").title(None),
+        alt.Color("Major_Genre").title(None).legend(None),
         tooltip=['Title:N', 'Major_Genre']
     ).transform_calculate(
         # Generate Gaussian jitter with a Box-Muller transform
@@ -311,10 +323,12 @@ def _(movies):
         alt.X("mean(US_Gross)").title('')
     )
     movies_chart = movies_circle + v_rule + mean_circle
-    movies_chart.properties(
+    movies_chart = movies_chart.properties(
         title="Adventure leads other Genres with Highest Average Gross $ in US"
     )
-    return
+
+    mo_movie_chart = mo.ui.altair_chart( movies_chart )
+    return (mo_movie_chart,)
 
 
 @app.cell
@@ -331,7 +345,7 @@ def _(movies):
 @app.cell
 def _(movies):
     X3 = movies[['Production_Budget','IMDB_Rating','IMDB_Votes', 'Rotten_Tomatoes_Rating','Major_Genre']]
-    y3 = movies['ln_US_Gross']
+    y3 = movies['US_Gross']
 
     categorical_features = ["Major_Genre"]
     categorical_transformer = Pipeline(
@@ -347,34 +361,61 @@ def _(movies):
             ('scaler',StandardScaler())
         ]
     )
+    numeric_transformer2 = Pipeline(
+        steps=[
+            ('polyfit', PolynomialFeatures())
+        ]
+    )
 
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", numeric_transformer, numeric_features),
+            #('poly', numeric_transformer2, numeric_features),
             ("cat", categorical_transformer, categorical_features),
         ]
     )
     reg = Pipeline(
         steps=[("preprocessor", preprocessor), ("reg", Lasso())]
     )
-    parameters = {'reg__alpha':[i/10 for i in range(1,11)]}
+    parameters = {
+        'reg__alpha':[i/10 for i in range(1,11)] , 
+        #'preprocessor__poly__polyfit':[tuple([i,i+1]) for i in range(1,5)]
+    }
 
     grid_search = GridSearchCV(reg, param_grid=parameters)
 
     lr3 = grid_search.fit(X3, y3)
 
-    lr3
+    best_estimator = lr3.best_estimator_
 
     return X3, lr3, y3
 
 
-@app.cell
+@app.cell(hide_code=True)
+def _(lr3, mo_movie_chart):
+    mo.vstack([
+        mo_movie_chart,
+        mo_movie_chart.value,
+         soot.plot_waterfall(lr3.best_estimator_ , mo_movie_chart.value, []).properties(
+            height=200
+        )  if len( mo_movie_chart.value ) == 1 else None
+    ])
+    return
+
+
+@app.cell(hide_code=True)
 def _():
+    mo.md(r"""*Note*: in this example, we applied a standard scaler transformer to the numeric columns.""")
+    return
+
+
+@app.cell
+def _(lr3):
     # works for pipeline
-    #fnames = reg[:-1].get_feature_names_out()
-    #coefs_ = reg[1].coef_
-    #for f,c in zip(fnames, coefs_):
-    #    print(f"{f} - {c:.4f}")
+    fnames = lr3.best_estimator_[0].get_feature_names_out()
+    coefs_ = lr3.best_estimator_[-1].coef_
+    for f,c in zip(fnames, coefs_):
+        print(f"{f} : {c:.4f}")
     return
 
 
@@ -390,16 +431,14 @@ def _(X3, lr3, y3):
 
 
 @app.cell
-def _(lr3):
-    lr3.best_estimator_.named_steps['preprocessor'].get_feature_names_out()
-    return
-
-
-@app.cell
 def _(resid):
+    # just for my own curiosity
     alt.Chart(resid).mark_circle(color='black').encode(
         alt.X("y_true").scale(zero=False),
         alt.Y("y_pred").scale(zero=False)
+    ) | alt.Chart(resid).mark_circle(color='black').encode(
+        alt.X("y_true").scale(type='log'),
+        alt.Y("resid")#.scale(type='log')
     )
     return
 
